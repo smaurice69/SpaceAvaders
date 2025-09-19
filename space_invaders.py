@@ -101,7 +101,10 @@ class Particle:
     def draw(self, surface: pygame.Surface) -> None:
         alpha = max(0, min(255, int(255 * (self.lifetime + 0.3))))
         radius = max(1, int(2 + 2 * self.lifetime))
-        color = self.color.copy()
+        # pygame.Color objects do not expose a ``copy`` method, so rebuild a fresh
+        # instance to avoid mutating the particle's base color when tweaking the
+        # alpha channel for drawing.
+        color = pygame.Color(self.color)
         color.a = alpha
         pygame.draw.circle(surface, color, (int(self.pos.x), int(self.pos.y)), radius)
 
