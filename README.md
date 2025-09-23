@@ -1,9 +1,10 @@
-# Space Avaders
+# Space Avaders: Star Cascade
 
-A compact Space-Invaders inspired arcade game built with Python 3 and pygame. The
-visuals are all generated with simple rectangles, gradients, and particles—no
-external assets are required. Expect quick rounds, crunchy laser blasts, and
-waves that keep pushing back.
+A bold, side-scrolling remix of the original Space Avaders project. Inspired by
+early console greats—think Gradius, Phantasy Zone, and Thunder Force—the action
+now surges across a neon skyline with parallax cities, rolling meteor storms,
+and enemy squadrons that arrive in choreographed waves. Procedural sprites,
+particles, and synthy bleeps keep everything cohesive without external assets.
 
 ## Getting started
 
@@ -17,23 +18,34 @@ waves that keep pushing back.
    python3 space_invaders.py
    ```
 
-The window opens at 900×700. Use `←` / `→` (or `A` / `D`) to move and `Space`
-to fire. Press `Esc` to quit.
+The game renders at 960×720 by default and scales smoothly if you resize the
+window or toggle fullscreen with `F`.
 
-## Gameplay features
+## Controls
 
-- **Classic formation battles** – Aliens march as a block, dive closer when
-  touching the arena edges, and their pace accelerates as you thin the horde.
-- **Responsive controls** – Tight, smooth left/right movement and a comfortable
-  firing cadence that encourages staying aggressive.
-- **Enemy fire** – Invaders shoot back from the front line, forcing you to weave
-  between incoming bolts.
-- **Scaling difficulty** – Clearing a wave bumps the difficulty: higher alien
-  speeds, denser formations, and quicker shots.
-- **Score chasing** – Rack up points with clean kills, tag the occasional bonus
-  UFO for a big payout, and keep an eye on the HUD for lives, wave, and score.
-- **Juice** – Simple particle bursts and a drifting starfield give every blast a
-  little extra flair.
+| Action                | Input                                  |
+|-----------------------|-----------------------------------------|
+| Thrust / drift        | Arrow keys or `W` `A` `S` `D`           |
+| Fire                  | `Space` or `Z`                          |
+| Boost burst           | Hold `Shift`                            |
+| Start / Restart run   | `Enter` (or `Space` on the title screen) |
+| Toggle fullscreen     | `F`                                     |
+| Mute / adjust volume  | `M`, `-`, `+`                           |
+| Quit                  | `Esc`                                   |
 
-Losing all three lives ends the run. Hit `Enter` on the game-over screen to try
-again.
+## Highlights
+
+- **Side-scrolling stages** – Drift through looping acts with bespoke parallax
+  skylines and stars that warp by the faster you fly.
+- **Enemy archetypes** – Fighters weave in sine waves, serpents slither in huge
+  arcs, bombers drop gravity bombs, spinners spray bullets, and meteor showers
+  demand last-second dodges.
+- **Power-up fantasy** – Snag Trident (triple shots), Shield (orbital barrier),
+  and Flux (speed & rate-of-fire boost) capsules to bend a wave in your favour.
+- **Distance & combo chasing** – The HUD tracks score, travelled mega-meters,
+  lives, and active buffs; chaining takedowns keeps a multiplier climbing.
+- **Juicy feedback** – Procedural muzzle flashes, thruster plumes, and crunchy
+  synth audio lean into the 1980s fantasy.
+
+Lose all lives and your run ends—press `Enter` to launch again and chase a
+longer ride.
