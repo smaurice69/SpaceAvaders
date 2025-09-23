@@ -1,9 +1,10 @@
-# Space Avaders
+# Space Avaders 2084
 
-A compact Space-Invaders inspired arcade game built with Python 3 and pygame. The
-visuals are all generated with simple rectangles, gradients, and particles—no
-external assets are required. Expect quick rounds, crunchy laser blasts, and
-waves that keep pushing back.
+A side-scrolling remix of the original project that leans into the console-shooter
+heritage of *Gradius*, *Defender*, and *R-Type*.  Every wave is scripted, the
+skyline scrolls by with parallax neon clouds, and minibosses close each stage
+with chunky, glowing bullet patterns.  The visuals are still fully procedural
+rectangles, gradients, and particles—no external art required.
 
 ## Getting started
 
@@ -17,23 +18,30 @@ waves that keep pushing back.
    python3 space_invaders.py
    ```
 
-The window opens at 900×700. Use `←` / `→` (or `A` / `D`) to move and `Space`
-to fire. Press `Esc` to quit.
+The game opens at 960×720. Use `← → ↑ ↓` (or `WASD`) to steer, hold `Space`,
+`Z`, or `J` to fire, and tap `F` to toggle fullscreen. Press `Esc` to quit.
 
 ## Gameplay features
 
-- **Classic formation battles** – Aliens march as a block, dive closer when
-  touching the arena edges, and their pace accelerates as you thin the horde.
-- **Responsive controls** – Tight, smooth left/right movement and a comfortable
-  firing cadence that encourages staying aggressive.
-- **Enemy fire** – Invaders shoot back from the front line, forcing you to weave
-  between incoming bolts.
-- **Scaling difficulty** – Clearing a wave bumps the difficulty: higher alien
-  speeds, denser formations, and quicker shots.
-- **Score chasing** – Rack up points with clean kills, tag the occasional bonus
-  UFO for a big payout, and keep an eye on the HUD for lives, wave, and score.
-- **Juice** – Simple particle bursts and a drifting starfield give every blast a
-  little extra flair.
+- **Scripted stages with nostalgic riffs** – Each wave is choreographed in a
+  timeline curated by a stage director, riffing on early-console classics: Galaga
+  inspired vanguard swoops, Gradius-style turret trenches, Defender chase
+  squadrons, and a neon fortress boss.
+- **True side-scrolling movement** – Freely strafe across the screen while the
+  background and enemy formations slide in from the horizon. The ship banks and
+  pulses with thruster trails as you weave through patterns.
+- **Juicy combat loop** – Dual blasters, rapid-fire upgrades, and barrier
+  modules drop from tougher foes. A combo timer rewards relentless offense with
+  bonus points and celebratory floating text.
+- **Boss finales** – Every stage concludes with a miniature bullet-hell
+  encounter. The boss tracks your vertical position, fires spreads and lances,
+  and showers power-ups when defeated.
+- **Parallax starfields & particles** – Multiple cloud layers, twinkling stars,
+  and dozens of sparks/explosions keep the screen buzzing without external
+  assets.
+- **Adaptive score chase** – Clear a stage to earn an extra life and roll into
+  the next theme at higher intensity. HUD callouts track rapid-fire timers,
+  barrier charges, and wave progression so you always know the stakes.
 
-Losing all three lives ends the run. Hit `Enter` on the game-over screen to try
-again.
+Lose all lives and you’ll hit the game-over banner; press `Enter` to launch back
+into the neon gauntlet.
