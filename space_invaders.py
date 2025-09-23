@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Space Avaders - a spruced-up Space-Invaders inspired clone.
 
-The game keeps the classic arcadey gameplay while adding modern flourishes:
-    * Aliens and shields take partial damage with visible wear and tear.
-    * New procedural sprites, glowing bullets, and light-weight animations.
+The game now riffs on early console-era side-scrollers:
+    * A constantly scrolling starfield with wide-open space lanes to dodge through.
+    * Waves of hand-scripted enemy patterns, from sine-surfing scouts to diving raiders and sentry towers.
+    * A mini boss encounter each sector and momentum that escalates speed and spectacle every stage.
+    * Procedurally shaded sprites, glowing bullets, and light-weight particle effects.
     * A tiny procedural audio soundscape with music, lasers, and explosions.
     * Smooth HD scaling so the action looks crisp in windowed or fullscreen.
 
@@ -18,7 +20,7 @@ import math
 import random
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pygame
 
@@ -29,62 +31,45 @@ SCREEN_WIDTH = 900
 SCREEN_HEIGHT = 700
 FPS = 60
 
+PLAYFIELD_MARGIN_X = 80
+PLAYFIELD_MARGIN_Y = 70
+
+SCROLL_SPEED_START = 160
+SCROLL_SPEED_STEP = 18
+SCROLL_SPEED_MAX = 320
+
 PLAYER_SPEED = 320
+PLAYER_FOCUS_SPEED = 210
 PLAYER_WIDTH = 72
 PLAYER_HEIGHT = 34
-PLAYER_COOLDOWN = 0.3  # seconds between shots
+PLAYER_COOLDOWN = 0.22  # seconds between shots
 PLAYER_LIVES = 3
 PLAYER_INVULNERABLE_TIME = 1.5
 
-BULLET_SPEED = 540
-ALIEN_BULLET_SPEED = 240
+BULLET_SPEED = 680
+ENEMY_BULLET_SPEED = 260
 PLAYER_BULLET_DAMAGE = 1
-ALIEN_BULLET_DAMAGE = 1
+ENEMY_BULLET_DAMAGE = 1
 
-ALIEN_ROWS_START = 4
-ALIEN_COLUMNS = 10
-ALIEN_ROW_GAP = 62
-ALIEN_COL_GAP = 72
-ALIEN_WIDTH = 52
-ALIEN_HEIGHT = 36
+ENEMY_WIDTH = 52
+ENEMY_HEIGHT = 36
 
-ALIEN_BASE_SPEED = 40
-ALIEN_SPEED_PER_LEVEL = 12
-ALIEN_SPEED_SCALE = 220
-ALIEN_DROP_DISTANCE = 26
+STAR_COUNT = 140
 
-ALIEN_FIRE_MIN_INTERVAL = 1.0
-ALIEN_FIRE_MAX_INTERVAL = 2.6
-
-UFO_SPAWN_MIN = 18
-UFO_SPAWN_MAX = 32
-UFO_SPEED = 210
-UFO_SCORE = 150
-
-SHIELD_COUNT = 3
-SHIELD_TILE_ROWS = 4
-SHIELD_TILE_COLS = 7
-SHIELD_TILE_SIZE = 18
-SHIELD_TILE_MAX_HEALTH = 4
-
-STAR_COUNT = 90
-
-BACKGROUND_GRADIENT_TOP = (10, 12, 28)
-BACKGROUND_GRADIENT_BOTTOM = (4, 4, 12)
+BACKGROUND_GRADIENT_TOP = (6, 10, 22)
+BACKGROUND_GRADIENT_BOTTOM = (2, 2, 12)
 PLAYER_COLOR = (80, 200, 255)
 PLAYER_GLOW_COLOR = (50, 140, 255)
 PLAYER_BULLET_COLOR = (255, 230, 150)
-ALIEN_COLORS = [
-    (100, 255, 170),
-    (120, 240, 100),
-    (255, 190, 100),
-    (255, 120, 150),
-    (255, 100, 210),
+ENEMY_COLOR_SETS = [
+    ((120, 240, 180), (60, 190, 150)),
+    ((255, 190, 120), (255, 120, 90)),
+    ((255, 110, 180), (210, 70, 210)),
+    ((180, 180, 255), (110, 140, 255)),
+    ((255, 150, 120), (255, 210, 120)),
 ]
-ALIEN_BULLET_COLOR = (255, 150, 150)
-UFO_COLOR = (255, 120, 120)
+ENEMY_BULLET_COLOR = (255, 150, 150)
 HUD_COLOR = (240, 240, 240)
-SHIELD_COLOR = (120, 220, 180)
 SPARK_COLORS = [
     (255, 200, 150),
     (255, 170, 120),
@@ -94,6 +79,13 @@ STAR_COLORS = [
     (180, 180, 255),
     (120, 120, 220),
     (90, 90, 170),
+]
+SECTOR_NAMES = [
+    "Crystal Drift",
+    "Nebula Run",
+    "Luminous Reef",
+    "Quantum Causeway",
+    "Aurora Crusade",
 ]
 
 
@@ -159,16 +151,18 @@ class Star:
     radius: float
     twinkle_speed: float
     phase: float
+    parallax: float
 
-    def update(self, dt: float) -> None:
-        self.y += self.speed * dt
-        if self.y > SCREEN_HEIGHT + 5:
-            self.y = -5
-            self.x = random.uniform(0, SCREEN_WIDTH)
-            self.speed = random.uniform(20, 90)
-            self.radius = random.uniform(1.0, 2.3)
+    def update(self, dt: float, scroll_speed: float) -> None:
+        self.x -= (self.speed + scroll_speed * self.parallax) * dt
+        if self.x < -10:
+            self.x = SCREEN_WIDTH + random.uniform(5, 40)
+            self.y = random.uniform(-20, SCREEN_HEIGHT + 20)
+            self.speed = random.uniform(20, 80)
+            self.radius = random.uniform(1.0, 2.6)
             self.twinkle_speed = random.uniform(0.8, 2.4)
             self.phase = random.uniform(0, math.tau)
+            self.parallax = random.uniform(0.25, 1.0)
 
     def draw(self, surface: pygame.Surface, time_accumulator: float) -> None:
         twinkle = 0.6 + 0.4 * math.sin(self.phase + time_accumulator * self.twinkle_speed)
@@ -199,46 +193,103 @@ class Bullet:
 
 
 @dataclass
-class Alien:
-    rect: pygame.Rect
-    row: int
+class Enemy:
     surface: pygame.Surface
+    pos: pygame.Vector2
+    velocity: pygame.Vector2
     max_health: int
     health: int
-    wobble_phase: float = field(default_factory=lambda: random.uniform(0, math.tau))
+    pattern: str
+    amplitude: float = 0.0
+    frequency: float = 1.0
+    phase: float = 0.0
+    shoot_range: Optional[Tuple[float, float]] = (1.6, 3.2)
+    next_shot: float = -1.0
+    score: int = 100
     hit_flash: float = 0.0
+    extra: Dict[str, Any] = field(default_factory=dict)
+    rect: pygame.Rect = field(init=False)
+    base_pos: pygame.Vector2 = field(init=False)
+    timer: float = 0.0
 
-    def apply_damage(self, amount: int, impact_point: Tuple[int, int]) -> bool:
+    def __post_init__(self) -> None:
+        self.rect = self.surface.get_rect(center=(int(self.pos.x), int(self.pos.y)))
+        self.base_pos = pygame.Vector2(self.pos)
+        if self.shoot_range is None:
+            self.next_shot = math.inf
+        elif self.next_shot <= 0:
+            self.reset_shoot_timer()
+
+    def reset_shoot_timer(self) -> None:
+        if self.shoot_range is None:
+            self.next_shot = math.inf
+        else:
+            low, high = self.shoot_range
+            self.next_shot = random.uniform(low, high)
+
+    def apply_damage(self, amount: int, impact_point: Optional[Tuple[int, int]]) -> bool:
         self.health = max(0, self.health - amount)
-        self.hit_flash = 0.2
-        local_x = max(0, min(self.surface.get_width() - 1, impact_point[0] - self.rect.x))
-        local_y = max(0, min(self.surface.get_height() - 1, impact_point[1] - self.rect.y))
-        radius = random.randint(6, 10)
-        crater = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
-        pygame.draw.circle(crater, (200, 200, 210, 255), (radius, radius), radius)
-        self.surface.blit(
-            crater,
-            (local_x - radius, local_y - radius),
-            special_flags=pygame.BLEND_RGBA_SUB,
-        )
-        outline = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
-        pygame.draw.circle(outline, (40, 40, 70, 140), (radius, radius), radius, width=2)
-        self.surface.blit(outline, (local_x - radius, local_y - radius))
+        self.hit_flash = 0.25
+        if impact_point is not None:
+            local_x = max(0, min(self.surface.get_width() - 1, impact_point[0] - self.rect.x))
+            local_y = max(0, min(self.surface.get_height() - 1, impact_point[1] - self.rect.y))
+            radius = random.randint(5, 9)
+            crater = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(crater, (200, 200, 210, 255), (radius, radius), radius)
+            self.surface.blit(
+                crater,
+                (local_x - radius, local_y - radius),
+                special_flags=pygame.BLEND_RGBA_SUB,
+            )
+            outline = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(outline, (40, 40, 70, 140), (radius, radius), radius, width=2)
+            self.surface.blit(outline, (local_x - radius, local_y - radius))
         return self.health <= 0
 
-    def update(self, dt: float) -> None:
+    def update(self, dt: float, scroll_speed: float) -> None:
+        self.timer += dt
+        self.pos.x += (self.velocity.x - scroll_speed) * dt
+        self.pos.y += self.velocity.y * dt
+        anchor_y = self.extra.get("anchor_y", self.base_pos.y)
+        if self.pattern == "sine":
+            self.pos.y = anchor_y + math.sin(self.timer * self.frequency + self.phase) * self.amplitude
+        elif self.pattern == "zigzag":
+            period = self.extra.get("period", 1.1)
+            direction = -1 if int(self.timer / max(0.01, period)) % 2 else 1
+            self.pos.y = anchor_y + direction * self.amplitude
+        elif self.pattern == "dive":
+            delay = self.extra.get("dive_delay", 0.6)
+            if self.timer > delay:
+                self.velocity.y = self.extra.get("dive_speed", 220)
+        elif self.pattern == "hover":
+            target = self.extra.get("target_y", anchor_y)
+            self.pos.y = lerp(self.pos.y, target, min(1.0, dt * 2.4))
+        elif self.pattern == "boss":
+            swing = self.extra.get("swing", 130)
+            self.pos.y = anchor_y + math.sin(self.timer * self.frequency) * swing
+        elif self.pattern == "arc":
+            factor = self.extra.get("arc_factor", 0.012)
+            self.pos.y = anchor_y + math.sin((self.base_pos.x - self.pos.x) * factor + self.phase) * self.amplitude
+        self.rect.center = (int(self.pos.x), int(self.pos.y))
         if self.hit_flash > 0:
-            self.hit_flash = max(0.0, self.hit_flash - dt * 4)
+            self.hit_flash = max(0.0, self.hit_flash - dt * 3.5)
+        if self.next_shot != math.inf:
+            self.next_shot -= dt
+
+    def ready_to_fire(self) -> bool:
+        return self.shoot_range is not None and self.next_shot <= 0
 
     def draw(self, surface: pygame.Surface, time_accumulator: float) -> None:
         dest = self.rect.copy()
-        dest.y += int(math.sin(time_accumulator * 3.0 + self.wobble_phase + self.row) * 3)
+        if self.pattern != "boss":
+            wobble = math.sin(time_accumulator * 2.6 + self.phase) * 2
+            dest.y += int(wobble)
         surface.blit(self.surface, dest)
         if self.hit_flash > 0:
             flash_alpha = int(200 * self.hit_flash)
             pygame.draw.rect(surface, (255, 255, 255, flash_alpha), dest, border_radius=10)
         if self.health < self.max_health:
-            ratio = self.health / self.max_health
+            ratio = self.health / max(1, self.max_health)
             bar_bg = pygame.Rect(dest.x + 6, dest.y - 6, dest.width - 12, 4)
             pygame.draw.rect(surface, (20, 20, 30, 180), bar_bg, border_radius=2)
             bar = bar_bg.copy()
@@ -247,64 +298,10 @@ class Alien:
 
 
 @dataclass
-class ShieldTile:
-    rect: pygame.Rect
-    max_health: int
-    health: int
-    hit_flash: float = 0.0
-    crack_seed: float = field(default_factory=random.random)
-
-
-@dataclass
-class Shield:
-    rect: pygame.Rect
-    tiles: List[ShieldTile]
-    color: pygame.Color
-
-    def update(self, dt: float) -> None:
-        for tile in self.tiles:
-            if tile.hit_flash > 0:
-                tile.hit_flash = max(0.0, tile.hit_flash - dt * 3)
-
-    def apply_damage(self, bullet_rect: pygame.Rect, damage: int) -> bool:
-        for tile in self.tiles:
-            if tile.health <= 0:
-                continue
-            if tile.rect.colliderect(bullet_rect):
-                tile.health = max(0, tile.health - damage)
-                tile.hit_flash = 0.2
-                return True
-        return False
-
-    def draw(self, surface: pygame.Surface) -> None:
-        for tile in self.tiles:
-            if tile.health <= 0:
-                continue
-            ratio = tile.health / tile.max_health
-            base = pygame.Color(self.color)
-            color = pygame.Color(
-                int(base.r * (0.6 + 0.4 * ratio)),
-                int(base.g * (0.6 + 0.4 * ratio)),
-                int(base.b * (0.6 + 0.4 * ratio)),
-                235,
-            )
-            if tile.hit_flash > 0:
-                color = color.lerp(pygame.Color(255, 255, 255), 0.6 * tile.hit_flash)
-            pygame.draw.rect(surface, color, tile.rect, border_radius=6)
-            if ratio < 1.0:
-                crack_color = pygame.Color(30, 50, 70, 180)
-                rand = random.Random(tile.crack_seed)
-                cracks = 1 + int((1 - ratio) * 3)
-                for _ in range(cracks):
-                    start = (
-                        tile.rect.x + rand.randint(0, tile.rect.width),
-                        tile.rect.y + rand.randint(0, tile.rect.height),
-                    )
-                    end = (
-                        tile.rect.x + rand.randint(0, tile.rect.width),
-                        tile.rect.y + rand.randint(0, tile.rect.height),
-                    )
-                    pygame.draw.line(surface, crack_color, start, end, width=1)
+class EnemySpawn:
+    time: float
+    pattern: str
+    kwargs: Dict[str, Any]
 
 
 # --- Audio -------------------------------------------------------------------------
@@ -453,34 +450,30 @@ class Game:
 
         self.player_surface = self._create_player_surface()
         self.player_rect = pygame.Rect(0, 0, PLAYER_WIDTH, PLAYER_HEIGHT)
-        self.player_rect.midbottom = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 60)
-        self.player_x = float(self.player_rect.x)
-        self.player_velocity = 0.0
+        self.player_pos = pygame.Vector2(0.0, 0.0)
+        self.player_velocity = pygame.Vector2(0.0, 0.0)
         self.player_cooldown_timer = 0.0
         self.player_invulnerable = 0.0
         self.player_thruster_timer = 0.0
         self.player_tilt = 0.0
+        self.focus_mode = False
         self.lives = PLAYER_LIVES
 
         self.player_bullets: List[Bullet] = []
-        self.alien_bullets: List[Bullet] = []
+        self.enemy_bullets: List[Bullet] = []
 
         self.particles: List[Particle] = []
 
-        self.aliens: List[Alien] = []
-        self.alien_rows = ALIEN_ROWS_START
-        self.total_aliens = 0
+        self.enemies: List[Enemy] = []
+        self.spawn_events: List[EnemySpawn] = []
+
+        self.scroll_speed = SCROLL_SPEED_START
+        self.target_scroll_speed = self.scroll_speed
+        self.stage_duration = 70.0
+        self.stage_timer = 0.0
+        self.stage_banner_timer = 0.0
         self.level = 1
-        self.alien_direction = 1
-        self.alien_dx_buffer = 0.0
-        self.alien_fire_timer = 0.0
-
-        self.shields: List[Shield] = []
-
-        self.ufo_rect: Optional[pygame.Rect] = None
-        self.ufo_direction = 1
-        self.ufo_timer = random.uniform(UFO_SPAWN_MIN, UFO_SPAWN_MAX)
-        self.ufo_surface = self._create_ufo_surface()
+        self.current_sector_name = SECTOR_NAMES[0]
 
         self.score = 0
         self.state = "playing"
@@ -496,8 +489,9 @@ class Game:
             t = y / max(1, SCREEN_HEIGHT - 1)
             color = lerp_color(BACKGROUND_GRADIENT_TOP, BACKGROUND_GRADIENT_BOTTOM, t)
             pygame.draw.line(surface, color, (0, y), (SCREEN_WIDTH, y))
-        surface = surface.convert()
-        return surface
+        for x in range(-SCREEN_HEIGHT, SCREEN_WIDTH, 120):
+            pygame.draw.line(surface, (12, 18, 38), (x, 0), (x + SCREEN_HEIGHT, SCREEN_HEIGHT), width=1)
+        return surface.convert()
 
     def _create_player_surface(self) -> pygame.Surface:
         surface = pygame.Surface((PLAYER_WIDTH, PLAYER_HEIGHT), pygame.SRCALPHA)
@@ -523,138 +517,386 @@ class Game:
         pygame.draw.ellipse(surface, (120, 200, 255, 180), canopy_rect.inflate(-6, -4))
         return surface.convert_alpha()
 
-    def _create_ufo_surface(self) -> pygame.Surface:
-        width, height = 90, 34
-        surface = pygame.Surface((width, height), pygame.SRCALPHA)
-        for y in range(height):
-            t = y / max(1, height - 1)
-            color = lerp_color(lighten(UFO_COLOR, 0.2), darken(UFO_COLOR, 0.6), t)
-            pygame.draw.line(surface, color, (10, y), (width - 10, y))
-        pygame.draw.ellipse(surface, (255, 220, 220, 220), (18, 6, width - 36, height - 12))
-        pygame.draw.rect(surface, (255, 240, 240, 200), (width // 2 - 12, 4, 24, 12), border_radius=6)
-        return surface.convert_alpha()
-
     def _setup_stars(self) -> None:
         self.stars.clear()
         for _ in range(STAR_COUNT):
             self.stars.append(
                 Star(
                     x=random.uniform(0, SCREEN_WIDTH),
-                    y=random.uniform(0, SCREEN_HEIGHT),
-                    speed=random.uniform(20, 90),
+                    y=random.uniform(-20, SCREEN_HEIGHT + 20),
+                    speed=random.uniform(10, 70),
                     color=pygame.Color(*random.choice(STAR_COLORS)),
-                    radius=random.uniform(1.0, 2.3),
-                    twinkle_speed=random.uniform(0.8, 2.4),
+                    radius=random.uniform(1.0, 2.4),
+                    twinkle_speed=random.uniform(0.6, 2.0),
                     phase=random.uniform(0, math.tau),
+                    parallax=random.uniform(0.2, 1.0),
                 )
             )
+    def _create_enemy_surface(
+        self,
+        palette_index: int,
+        size: Tuple[int, int] = (ENEMY_WIDTH, ENEMY_HEIGHT),
+        wing_style: str = "standard",
+    ) -> pygame.Surface:
+        width, height = size
+        base, accent = ENEMY_COLOR_SETS[palette_index % len(ENEMY_COLOR_SETS)]
+        surface = pygame.Surface((width, height), pygame.SRCALPHA)
+        highlight = lighten(base, 0.3)
+        shadow = darken(base, 0.5)
+        for y in range(height):
+            t = y / max(1, height - 1)
+            color = lerp_color(highlight, shadow, t)
+            pygame.draw.line(surface, color, (8, y), (width - 8, y))
+        nose = [
+            (width - 6, height // 2),
+            (width - 20, 4),
+            (width - 24, height - 4),
+        ]
+        pygame.draw.polygon(surface, lighten(accent, 0.15), nose)
+        pygame.draw.ellipse(surface, lighten(base, 0.45), (12, height // 3, width - 40, height // 3))
+        canopy = pygame.Rect(0, 0, width // 3, height // 2)
+        canopy.center = (width // 3, height // 2)
+        pygame.draw.ellipse(surface, (255, 255, 255, 140), canopy)
+        glow = pygame.Surface((width, height), pygame.SRCALPHA)
+        pygame.draw.ellipse(glow, (*lighten(accent, 0.4), 120), (-12, height // 2, width + 24, height))
+        surface.blit(glow, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+        if wing_style == "heavy":
+            pygame.draw.rect(surface, darken(accent, 0.4), (6, height // 2 - 6, width // 3, 12), border_radius=4)
+        return surface.convert_alpha()
+
+    def _create_boss_surface(self, palette_index: int) -> pygame.Surface:
+        width, height = 180, 120
+        base, accent = ENEMY_COLOR_SETS[palette_index % len(ENEMY_COLOR_SETS)]
+        surface = pygame.Surface((width, height), pygame.SRCALPHA)
+        highlight = lighten(base, 0.25)
+        shadow = darken(base, 0.6)
+        for y in range(height):
+            t = y / max(1, height - 1)
+            color = lerp_color(highlight, shadow, t)
+            pygame.draw.line(surface, color, (20, y), (width - 20, y))
+        pygame.draw.ellipse(surface, lighten(accent, 0.2), (40, 10, width - 80, height - 20))
+        pygame.draw.ellipse(surface, (255, 255, 255, 140), (width // 2 - 30, height // 2 - 24, 60, 48))
+        spine = pygame.Surface((width, height), pygame.SRCALPHA)
+        pygame.draw.polygon(
+            spine,
+            (*lighten(accent, 0.5), 180),
+            [(width - 10, height // 2), (width - 60, 8), (width - 60, height - 8)],
+        )
+        surface.blit(spine, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+        return surface.convert_alpha()
 
     def reset(self) -> None:
-        self.level = 1
         self.score = 0
         self.lives = PLAYER_LIVES
-        self.player_rect.midbottom = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 60)
-        self.player_x = float(self.player_rect.x)
-        self.player_velocity = 0.0
+        self.level = 1
+        self.scroll_speed = SCROLL_SPEED_START
+        self.target_scroll_speed = self.scroll_speed
+        self.player_pos.update(SCREEN_WIDTH * 0.18, SCREEN_HEIGHT * 0.5)
+        self.player_rect.center = (int(self.player_pos.x), int(self.player_pos.y))
+        self.player_velocity.update(0, 0)
         self.player_cooldown_timer = 0.0
-        self.player_invulnerable = 1.0
+        self.player_invulnerable = 0.0
         self.player_thruster_timer = 0.0
         self.player_tilt = 0.0
+        self.focus_mode = False
         self.player_bullets.clear()
-        self.alien_bullets.clear()
+        self.enemy_bullets.clear()
         self.particles.clear()
-        self.alien_rows = ALIEN_ROWS_START
-        self.alien_direction = 1
-        self.alien_dx_buffer = 0.0
-        self.alien_fire_timer = random.uniform(ALIEN_FIRE_MIN_INTERVAL, ALIEN_FIRE_MAX_INTERVAL)
-        self.ufo_rect = None
-        self.ufo_timer = random.uniform(UFO_SPAWN_MIN, UFO_SPAWN_MAX)
+        self.enemies.clear()
+        self.spawn_events.clear()
+        self.stage_banner_timer = 3.5
         self.state = "playing"
-        self.shields = self._create_shields()
-        self.spawn_wave()
+        self.current_sector_name = SECTOR_NAMES[0]
+        self.start_stage()
 
-    def _create_shields(self) -> List[Shield]:
-        shields: List[Shield] = []
-        shield_width = SHIELD_TILE_COLS * SHIELD_TILE_SIZE
-        y = SCREEN_HEIGHT - 170
-        spacing = SCREEN_WIDTH // (SHIELD_COUNT + 1)
-        for index in range(SHIELD_COUNT):
-            center_x = spacing * (index + 1)
-            left = int(center_x - shield_width / 2)
-            rect = pygame.Rect(left, y, shield_width, SHIELD_TILE_ROWS * SHIELD_TILE_SIZE)
-            tiles: List[ShieldTile] = []
-            for row in range(SHIELD_TILE_ROWS):
-                for col in range(SHIELD_TILE_COLS):
-                    if row == 0 and (col < 1 or col > SHIELD_TILE_COLS - 2):
-                        continue
-                    if row == 1 and (col == 0 or col == SHIELD_TILE_COLS - 1):
-                        continue
-                    if row == SHIELD_TILE_ROWS - 1 and col in (0, SHIELD_TILE_COLS - 1):
-                        continue
-                    tile_rect = pygame.Rect(
-                        rect.x + col * SHIELD_TILE_SIZE,
-                        rect.y + row * SHIELD_TILE_SIZE,
-                        SHIELD_TILE_SIZE - 2,
-                        SHIELD_TILE_SIZE - 2,
-                    )
-                    tiles.append(
-                        ShieldTile(
-                            rect=tile_rect,
-                            max_health=SHIELD_TILE_MAX_HEALTH,
-                            health=SHIELD_TILE_MAX_HEALTH,
-                        )
-                    )
-            shields.append(Shield(rect=rect, tiles=tiles, color=pygame.Color(*SHIELD_COLOR)))
-        return shields
+    def start_stage(self) -> None:
+        self.stage_timer = 0.0
+        self.stage_duration = max(54.0, 72.0 - (self.level - 1) * 4.0)
+        self.spawn_events.clear()
+        self.enemies.clear()
+        self.enemy_bullets.clear()
+        self.player_bullets.clear()
+        self.current_sector_name = SECTOR_NAMES[(self.level - 1) % len(SECTOR_NAMES)]
+        self.plan_stage()
 
-    def spawn_wave(self) -> None:
-        rows = ALIEN_ROWS_START + min(self.level - 1, 3)
-        self.alien_rows = rows
-        cols = ALIEN_COLUMNS
-        top_offset = 120
-        left_offset = (SCREEN_WIDTH - (cols - 1) * ALIEN_COL_GAP) // 2 - ALIEN_WIDTH // 2
+    def plan_stage(self) -> None:
+        pace = max(0.65, 1.0 - (self.level - 1) * 0.05)
+        strength = 1.0 + (self.level - 1) * 0.2
+        bonus = min(3, self.level - 1)
+        base_time = 1.5
+        self.queue_spawn(
+            base_time,
+            "sine",
+            count=6 + bonus,
+            y=SCREEN_HEIGHT * 0.35,
+            amplitude=70 + 8 * strength,
+            spacing=54,
+            speed=190 + 12 * strength,
+            palette=0,
+        )
+        base_time += 4.0 * pace
+        self.queue_spawn(
+            base_time,
+            "sine_lower",
+            count=5 + min(4, self.level),
+            y=SCREEN_HEIGHT * 0.68,
+            amplitude=60 + 10 * strength,
+            spacing=58,
+            speed=200 + 10 * strength,
+            palette=1,
+            phase_offset=math.pi / 3,
+        )
+        base_time += 4.6 * pace
+        self.queue_spawn(
+            base_time,
+            "dive",
+            count=4 + self.level,
+            y=PLAYFIELD_MARGIN_Y + 30,
+            spacing=42,
+            speed=200 + 18 * strength,
+            palette=2,
+        )
+        base_time += 5.2 * pace
+        self.queue_spawn(
+            base_time,
+            "arc",
+            count=6 + min(4, self.level),
+            y=SCREEN_HEIGHT * 0.5,
+            amplitude=90 + 12 * strength,
+            spacing=52,
+            speed=180 + 14 * strength,
+            palette=3,
+        )
+        base_time += 6.0 * pace
+        self.queue_spawn(
+            base_time,
+            "turrets",
+            count=2 + (self.level // 2),
+            y=PLAYFIELD_MARGIN_Y + 120,
+            spacing=160,
+            speed=120 + 10 * strength,
+            palette=4,
+        )
+        base_time += 4.8 * pace
+        self.queue_spawn(
+            base_time,
+            "mines",
+            count=5 + self.level,
+            y=SCREEN_HEIGHT * 0.55,
+            spacing=86,
+            palette=1,
+        )
+        boss_time = max(self.stage_duration - 16.0, base_time + 6.0 * pace)
+        self.queue_spawn(
+            boss_time,
+            "boss",
+            y=SCREEN_HEIGHT * 0.5,
+            palette=(self.level - 1) % len(ENEMY_COLOR_SETS),
+        )
 
-        self.aliens.clear()
-        for row in range(rows):
-            for col in range(cols):
-                rect = pygame.Rect(0, 0, ALIEN_WIDTH, ALIEN_HEIGHT)
-                rect.x = left_offset + col * ALIEN_COL_GAP
-                rect.y = top_offset + row * ALIEN_ROW_GAP
-                base_color = ALIEN_COLORS[row % len(ALIEN_COLORS)]
-                alien_surface = self._create_alien_surface(base_color)
-                base_health = 2 + (self.level - 1) // 2
-                health = base_health + row // 2
-                self.aliens.append(
-                    Alien(
-                        rect=rect,
-                        row=row,
-                        surface=alien_surface,
-                        max_health=health,
-                        health=health,
-                    )
-                )
-        self.total_aliens = len(self.aliens)
-        self.alien_direction = 1
-        self.alien_dx_buffer = 0.0
-        self.alien_fire_timer = random.uniform(ALIEN_FIRE_MIN_INTERVAL, ALIEN_FIRE_MAX_INTERVAL)
+    def queue_spawn(self, time: float, pattern: str, **kwargs: Any) -> None:
+        self.spawn_events.append(EnemySpawn(time=time, pattern=pattern, kwargs=kwargs))
+        self.spawn_events.sort(key=lambda event: event.time)
 
-    def _create_alien_surface(self, base_color: Tuple[int, int, int]) -> pygame.Surface:
-        surface = pygame.Surface((ALIEN_WIDTH, ALIEN_HEIGHT), pygame.SRCALPHA)
-        highlight = lighten(base_color, 0.25)
-        shadow = darken(base_color, 0.55)
-        for y in range(ALIEN_HEIGHT):
-            t = y / max(1, ALIEN_HEIGHT - 1)
-            color = lerp_color(highlight, shadow, t)
-            pygame.draw.line(surface, color, (8, y), (ALIEN_WIDTH - 8, y))
-        pygame.draw.ellipse(surface, lighten(base_color, 0.4), (10, 4, ALIEN_WIDTH - 20, 20))
-        pygame.draw.ellipse(surface, (20, 20, 35, 120), (14, 8, ALIEN_WIDTH - 28, 12))
-        eye_color = pygame.Color(10, 20, 30, 200)
-        pygame.draw.circle(surface, eye_color, (ALIEN_WIDTH // 3, ALIEN_HEIGHT // 2), 5)
-        pygame.draw.circle(surface, eye_color, (ALIEN_WIDTH * 2 // 3, ALIEN_HEIGHT // 2), 5)
-        glow = pygame.Surface((ALIEN_WIDTH, ALIEN_HEIGHT), pygame.SRCALPHA)
-        pygame.draw.ellipse(glow, (*lighten(base_color, 0.6), 120), (-10, ALIEN_HEIGHT // 2, ALIEN_WIDTH + 20, ALIEN_HEIGHT))
-        surface.blit(glow, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
-        return surface.convert_alpha()
+    def _handle_spawn_event(self, event: EnemySpawn) -> None:
+        pattern = event.pattern
+        if pattern == "sine":
+            self._spawn_sine_wave(event.kwargs)
+        elif pattern == "sine_lower":
+            params = dict(event.kwargs)
+            params.setdefault("phase_offset", math.pi / 3)
+            self._spawn_sine_wave(params)
+        elif pattern == "dive":
+            self._spawn_dive_squad(event.kwargs)
+        elif pattern == "arc":
+            self._spawn_arc_dancers(event.kwargs)
+        elif pattern == "turrets":
+            self._spawn_turret_line(event.kwargs)
+        elif pattern == "mines":
+            self._spawn_mine_field(event.kwargs)
+        elif pattern == "boss":
+            self._spawn_boss(event.kwargs)
+    def _spawn_enemy(
+        self,
+        *,
+        position: Tuple[float, float],
+        velocity: Tuple[float, float],
+        pattern: str,
+        health: int,
+        palette_index: int,
+        amplitude: float = 0.0,
+        frequency: float = 1.0,
+        phase: float = 0.0,
+        shoot_range: Optional[Tuple[float, float]] = (1.6, 3.0),
+        score: int = 120,
+        size: Tuple[int, int] = (ENEMY_WIDTH, ENEMY_HEIGHT),
+        wing_style: str = "standard",
+        extra: Optional[Dict[str, Any]] = None,
+        surface: Optional[pygame.Surface] = None,
+    ) -> Enemy:
+        if surface is None:
+            surface = self._create_enemy_surface(palette_index, size, wing_style)
+        extra_data = dict(extra or {})
+        extra_data.setdefault("anchor_y", position[1])
+        enemy = Enemy(
+            surface=surface,
+            pos=pygame.Vector2(position),
+            velocity=pygame.Vector2(velocity),
+            max_health=health,
+            health=health,
+            pattern=pattern,
+            amplitude=amplitude,
+            frequency=frequency,
+            phase=phase,
+            shoot_range=shoot_range,
+            score=score,
+            extra=extra_data,
+        )
+        self.enemies.append(enemy)
+        return enemy
+
+    def _spawn_sine_wave(self, params: Dict[str, Any]) -> None:
+        count = params.get("count", 5)
+        base_y = params.get("y", SCREEN_HEIGHT * 0.5)
+        amplitude = params.get("amplitude", 70)
+        spacing = params.get("spacing", 52)
+        speed = params.get("speed", 180)
+        palette = params.get("palette", 0)
+        phase_offset = params.get("phase_offset", 0.0)
+        frequency = 1.4 + 0.05 * self.level
+        health = 3 + (self.level - 1) // 2
+        for i in range(count):
+            pos_x = SCREEN_WIDTH + 100 + i * spacing * 0.4
+            pos_y = base_y + math.sin((i / max(1, count - 1)) * math.pi) * 12
+            enemy = self._spawn_enemy(
+                position=(pos_x, pos_y),
+                velocity=(-speed, 0),
+                pattern="sine",
+                health=health,
+                palette_index=palette,
+                amplitude=amplitude,
+                frequency=frequency,
+                phase=phase_offset + i * 0.45,
+                shoot_range=(1.5, 2.9),
+                score=140 + 12 * self.level,
+            )
+            enemy.extra["anchor_y"] = base_y + (i % 2) * 16 - 8
+
+    def _spawn_dive_squad(self, params: Dict[str, Any]) -> None:
+        count = params.get("count", 6)
+        start_y = params.get("y", PLAYFIELD_MARGIN_Y + 40)
+        spacing = params.get("spacing", 42)
+        speed = params.get("speed", 210)
+        palette = params.get("palette", 2)
+        health = 2 + (self.level // 2)
+        for i in range(count):
+            pos_x = SCREEN_WIDTH + 80 + i * 36
+            pos_y = start_y - i * spacing * 0.4
+            enemy = self._spawn_enemy(
+                position=(pos_x, pos_y),
+                velocity=(-speed, 0),
+                pattern="dive",
+                health=health,
+                palette_index=palette,
+                amplitude=70 + i * 6,
+                extra={"dive_delay": 0.4 + i * 0.12, "dive_speed": 240 + 20 * self.level},
+                shoot_range=(2.4, 3.6) if self.level > 1 else None,
+                score=160 + 14 * self.level,
+            )
+            enemy.extra["anchor_y"] = pos_y
+
+    def _spawn_arc_dancers(self, params: Dict[str, Any]) -> None:
+        count = params.get("count", 5)
+        base_y = params.get("y", SCREEN_HEIGHT * 0.5)
+        amplitude = params.get("amplitude", 80)
+        spacing = params.get("spacing", 54)
+        speed = params.get("speed", 170)
+        palette = params.get("palette", 3)
+        health = 3 + (self.level - 1) // 2
+        for i in range(count):
+            pos_x = SCREEN_WIDTH + 120 + i * spacing
+            pos_y = base_y + (i % 3 - 1) * 26
+            self._spawn_enemy(
+                position=(pos_x, pos_y),
+                velocity=(-speed, 0),
+                pattern="arc",
+                health=health,
+                palette_index=palette,
+                amplitude=amplitude,
+                frequency=1.1 + 0.03 * self.level,
+                phase=i * 0.6,
+                shoot_range=(1.2, 2.4),
+                score=150 + 15 * self.level,
+                extra={"arc_factor": 0.014 + 0.002 * (self.level - 1)},
+            )
+
+    def _spawn_turret_line(self, params: Dict[str, Any]) -> None:
+        count = params.get("count", 3)
+        base_y = params.get("y", PLAYFIELD_MARGIN_Y + 120)
+        spacing = params.get("spacing", 160)
+        speed = params.get("speed", 120)
+        palette = params.get("palette", 4)
+        health = 4 + self.level
+        for i in range(count):
+            target_y = base_y + (i % 2) * 160
+            enemy = self._spawn_enemy(
+                position=(SCREEN_WIDTH + 140 + i * spacing, target_y - 120),
+                velocity=(-speed, 0),
+                pattern="hover",
+                health=health,
+                palette_index=palette,
+                amplitude=40,
+                frequency=1.0,
+                phase=i * 0.3,
+                shoot_range=(0.8, 1.6),
+                score=220 + 20 * self.level,
+                size=(ENEMY_WIDTH + 18, ENEMY_HEIGHT + 12),
+                wing_style="heavy",
+                extra={"target_y": target_y, "anchor_y": target_y - 40, "persistent": 1.0},
+            )
+            enemy.extra["anchor_y"] = target_y - 40
+
+    def _spawn_mine_field(self, params: Dict[str, Any]) -> None:
+        count = params.get("count", 6)
+        base_y = params.get("y", SCREEN_HEIGHT * 0.5)
+        spacing = params.get("spacing", 90)
+        palette = params.get("palette", 1)
+        health = 3 + (self.level // 3)
+        for i in range(count):
+            offset = (i % 3 - 1) * 28
+            self._spawn_enemy(
+                position=(SCREEN_WIDTH + 100 + i * spacing, base_y + offset),
+                velocity=(-(self.scroll_speed * 0.6 + 80), 0),
+                pattern="zigzag",
+                health=health,
+                palette_index=palette,
+                amplitude=50 + 10 * (i % 3),
+                frequency=1.0,
+                shoot_range=None,
+                score=90 + 8 * self.level,
+                extra={"period": 0.8 + 0.1 * (i % 3)},
+            )
+
+    def _spawn_boss(self, params: Dict[str, Any]) -> None:
+        y = params.get("y", SCREEN_HEIGHT * 0.5)
+        palette = params.get("palette", 0)
+        health = 60 + (self.level - 1) * 18
+        self._spawn_enemy(
+            position=(SCREEN_WIDTH + 220, y),
+            velocity=(-self.scroll_speed * 0.45, 0),
+            pattern="boss",
+            health=health,
+            palette_index=palette,
+            amplitude=0.0,
+            frequency=0.8 + 0.05 * self.level,
+            phase=0.0,
+            shoot_range=(0.6, 1.1),
+            score=1500 + 150 * self.level,
+            size=(180, 120),
+            extra={"anchor_y": y, "swing": 140 + 12 * self.level, "persistent": 1.0},
+            surface=self._create_boss_surface(palette),
+        )
+        self.audio.play("hit", 0.6)
 
     # -- Game loop -----------------------------------------------------------------
 
@@ -704,10 +946,9 @@ class Game:
     def update(self, dt: float) -> None:
         self.time_accumulator += dt
         for star in self.stars:
-            star.update(dt)
-
-        for shield in self.shields:
-            shield.update(dt)
+            star.update(dt, self.scroll_speed)
+        if self.stage_banner_timer > 0:
+            self.stage_banner_timer = max(0.0, self.stage_banner_timer - dt)
 
         if self.state != "playing":
             self.update_particles(dt)
@@ -715,47 +956,59 @@ class Game:
 
         self.update_player(dt)
         self.update_player_bullets(dt)
-        self.update_aliens(dt)
-        self.update_alien_bullets(dt)
-        self.update_ufo(dt)
+        self.update_enemies(dt)
+        self.update_enemy_bullets(dt)
         self.update_particles(dt)
-
     def update_player(self, dt: float) -> None:
         keys = pygame.key.get_pressed()
-        target_velocity = 0.0
+        direction = pygame.Vector2(0, 0)
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            target_velocity -= PLAYER_SPEED
+            direction.x -= 1
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            target_velocity += PLAYER_SPEED
-        self.player_velocity = target_velocity
-        self.player_x += self.player_velocity * dt
-        self.player_x = max(40, min(SCREEN_WIDTH - 40 - PLAYER_WIDTH, self.player_x))
-        previous_x = self.player_rect.x
-        self.player_rect.x = int(self.player_x)
-        delta_x = self.player_rect.x - previous_x
-        self.player_tilt = lerp(self.player_tilt, -delta_x * 0.3, min(1.0, dt * 10))
+            direction.x += 1
+        if keys[pygame.K_UP] or keys[pygame.K_w]:
+            direction.y -= 1
+        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+            direction.y += 1
+        focus = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
+        speed = PLAYER_FOCUS_SPEED if focus else PLAYER_SPEED
+        if direction.length_squared() > 0:
+            direction = direction.normalize()
+        self.player_pos += direction * speed * dt
+        left_bound = PLAYFIELD_MARGIN_X
+        right_bound = SCREEN_WIDTH - PLAYFIELD_MARGIN_X
+        top_bound = PLAYFIELD_MARGIN_Y
+        bottom_bound = SCREEN_HEIGHT - PLAYFIELD_MARGIN_Y
+        self.player_pos.x = max(left_bound, min(right_bound, self.player_pos.x))
+        self.player_pos.y = max(top_bound, min(bottom_bound, self.player_pos.y))
+        previous_center = self.player_rect.center
+        self.player_rect.center = (int(self.player_pos.x), int(self.player_pos.y))
+        delta = self.player_rect.centerx - previous_center[0]
+        self.player_tilt = lerp(self.player_tilt, -delta * 0.2, min(1.0, dt * 10))
+        self.focus_mode = focus
 
         if self.player_cooldown_timer > 0:
             self.player_cooldown_timer -= dt
-        if (keys[pygame.K_SPACE] or keys[pygame.K_UP]) and self.player_cooldown_timer <= 0:
+        if (keys[pygame.K_SPACE] or keys[pygame.K_z] or keys[pygame.K_x]) and self.player_cooldown_timer <= 0:
             bullet = Bullet(
-                pos=pygame.Vector2(self.player_rect.centerx, self.player_rect.top - 8),
-                velocity=pygame.Vector2(0, -BULLET_SPEED),
+                pos=pygame.Vector2(self.player_rect.midright[0] + 12, self.player_rect.midright[1]),
+                velocity=pygame.Vector2(BULLET_SPEED, 0),
                 damage=PLAYER_BULLET_DAMAGE,
                 color=pygame.Color(*PLAYER_BULLET_COLOR),
-                size=(8, 20),
+                size=(22, 8),
                 from_player=True,
-                glow_radius=26,
+                glow_radius=28,
             )
             self.player_bullets.append(bullet)
-            self.player_cooldown_timer = PLAYER_COOLDOWN
+            self.player_cooldown_timer = PLAYER_COOLDOWN * (0.7 if focus else 1.0)
             self.audio.play("laser", 0.8)
-            self.spawn_muzzle_flash(pygame.Vector2(bullet.pos))
+            self.spawn_muzzle_flash(pygame.Vector2(self.player_rect.midright))
 
         self.player_thruster_timer += dt
-        if self.player_thruster_timer >= 0.05:
+        thruster_rate = 0.04 if focus else 0.06
+        if self.player_thruster_timer >= thruster_rate:
             self.player_thruster_timer = 0.0
-            self.spawn_thruster_particles()
+            self.spawn_thruster_particles(focus)
 
         if self.player_invulnerable > 0:
             self.player_invulnerable -= dt
@@ -763,148 +1016,110 @@ class Game:
     def update_player_bullets(self, dt: float) -> None:
         for bullet in self.player_bullets[:]:
             bullet.update(dt)
-            if bullet.rect.bottom < 0:
+            if self.bullet_offscreen(bullet):
                 self.player_bullets.remove(bullet)
                 continue
-            if self.damage_shields(bullet.rect, PLAYER_BULLET_DAMAGE):
-                self.player_bullets.remove(bullet)
-                self.audio.play("shield", 0.4)
-                self.spawn_hit_sparks(pygame.Vector2(bullet.pos), tone="shield")
-                continue
-            hit_alien = None
-            for alien in self.aliens:
-                if bullet.rect.colliderect(alien.rect):
-                    hit_alien = alien
+            hit_enemy = None
+            for enemy in self.enemies:
+                if bullet.rect.colliderect(enemy.rect):
+                    hit_enemy = enemy
                     break
-            if hit_alien:
-                destroyed = hit_alien.apply_damage(PLAYER_BULLET_DAMAGE, bullet.rect.center)
+            if hit_enemy:
+                destroyed = hit_enemy.apply_damage(PLAYER_BULLET_DAMAGE, bullet.rect.center)
                 self.spawn_hit_sparks(pygame.Vector2(bullet.pos))
-                self.audio.play("hit", 0.5)
+                self.audio.play("hit", 0.55)
                 if destroyed:
-                    self.aliens.remove(hit_alien)
-                    score_gain = 20 + 6 * (self.alien_rows - hit_alien.row)
-                    self.score += score_gain
-                    self.spawn_explosion(pygame.Vector2(hit_alien.rect.center))
-                    self.audio.play("explosion", 0.7)
+                    self.enemies.remove(hit_enemy)
+                    self.score += hit_enemy.score
+                    sparks = 60 if hit_enemy.pattern == "boss" else 28
+                    self.spawn_explosion(pygame.Vector2(hit_enemy.rect.center), sparks=sparks)
+                    self.audio.play("explosion", 1.0 if hit_enemy.pattern == "boss" else 0.7)
                 self.player_bullets.remove(bullet)
+
+    def update_enemies(self, dt: float) -> None:
+        self.scroll_speed = lerp(self.scroll_speed, self.target_scroll_speed, min(1.0, dt * 0.5))
+        self.stage_timer += dt
+        while self.spawn_events and self.spawn_events[0].time <= self.stage_timer:
+            event = self.spawn_events.pop(0)
+            self._handle_spawn_event(event)
+
+        for enemy in self.enemies[:]:
+            enemy.update(dt, self.scroll_speed)
+            offscreen = (
+                enemy.rect.right < -160
+                or enemy.rect.top > SCREEN_HEIGHT + 160
+                or enemy.rect.bottom < -160
+            )
+            if offscreen and enemy.extra.get("persistent", 0.0) < 0.5:
+                self.enemies.remove(enemy)
                 continue
-            if self.ufo_rect and bullet.rect.colliderect(self.ufo_rect):
-                self.score += UFO_SCORE
-                self.spawn_explosion(pygame.Vector2(self.ufo_rect.center), sparks=30)
-                self.audio.play("explosion", 0.7)
-                self.ufo_rect = None
-                self.player_bullets.remove(bullet)
-                continue
-        if not self.aliens:
+            if enemy.ready_to_fire() and enemy.rect.centerx < SCREEN_WIDTH + 40:
+                self.fire_enemy_bullet(enemy)
+
+        if not self.enemies and not self.spawn_events and self.stage_timer > 2.0:
             self.level += 1
-            self.player_bullets.clear()
-            self.alien_bullets.clear()
-            self.spawn_wave()
+            self.stage_banner_timer = 3.0
+            self.target_scroll_speed = min(SCROLL_SPEED_MAX, self.target_scroll_speed + SCROLL_SPEED_STEP)
+            self.audio.play("hit", 0.5)
+            self.start_stage()
 
-    def update_aliens(self, dt: float) -> None:
-        if not self.aliens:
-            return
-        min_x = min(alien.rect.x for alien in self.aliens)
-        max_x = max(alien.rect.x + alien.rect.width for alien in self.aliens)
-
-        speed = self.current_alien_speed()
-        dx = speed * self.alien_direction * dt
-
-        if min_x + dx < 30 or max_x + dx > SCREEN_WIDTH - 30:
-            self.alien_direction *= -1
-            dx = self.alien_direction * speed * dt
-            for alien in self.aliens:
-                alien.rect.y += ALIEN_DROP_DISTANCE
-                if alien.rect.bottom >= self.player_rect.top:
-                    self.player_hit()
-
-        self.alien_dx_buffer += dx
-        move = 0
-        if self.alien_dx_buffer >= 1:
-            move = int(self.alien_dx_buffer)
-        elif self.alien_dx_buffer <= -1:
-            move = int(self.alien_dx_buffer)
-        if move:
-            for alien in self.aliens:
-                alien.rect.x += move
-            self.alien_dx_buffer -= move
-
-        for alien in self.aliens:
-            alien.update(dt)
-
-        self.alien_fire_timer -= dt
-        if self.alien_fire_timer <= 0:
-            self.fire_alien_bullet()
-            interval = random.uniform(ALIEN_FIRE_MIN_INTERVAL, ALIEN_FIRE_MAX_INTERVAL)
-            interval = max(0.25, interval - (self.level - 1) * 0.1)
-            self.alien_fire_timer = interval
-
-    def current_alien_speed(self) -> float:
-        if not self.aliens:
-            return ALIEN_BASE_SPEED
-        alive_ratio = len(self.aliens) / max(1, self.total_aliens)
-        base = ALIEN_BASE_SPEED + (self.level - 1) * ALIEN_SPEED_PER_LEVEL
-        bonus = (1.0 - alive_ratio) * ALIEN_SPEED_SCALE
-        return base + bonus
-
-    def fire_alien_bullet(self) -> None:
-        if not self.aliens:
-            return
-        columns: Dict[int, List[Alien]] = {}
-        for alien in self.aliens:
-            columns.setdefault(alien.rect.x, []).append(alien)
-        shooter_column = random.choice(list(columns.values()))
-        shooter = max(shooter_column, key=lambda a: a.rect.y)
+    def fire_enemy_bullet(self, enemy: Enemy) -> None:
+        enemy.reset_shoot_timer()
+        origin = pygame.Vector2(enemy.rect.center)
+        aim = pygame.Vector2(self.player_rect.center) - origin
+        if aim.length_squared() == 0:
+            direction = pygame.Vector2(-1, 0)
+        else:
+            direction = aim.normalize()
+        speed = ENEMY_BULLET_SPEED + self.level * 14
+        velocity = direction * speed
         bullet = Bullet(
-            pos=pygame.Vector2(shooter.rect.centerx, shooter.rect.bottom + 10),
-            velocity=pygame.Vector2(0, ALIEN_BULLET_SPEED + self.level * 32),
-            damage=ALIEN_BULLET_DAMAGE,
-            color=pygame.Color(*ALIEN_BULLET_COLOR),
-            size=(6, 16),
+            pos=pygame.Vector2(origin),
+            velocity=velocity,
+            damage=ENEMY_BULLET_DAMAGE,
+            color=pygame.Color(*ENEMY_BULLET_COLOR),
+            size=(12, 12),
             from_player=False,
-            glow_radius=20,
+            glow_radius=24,
         )
-        self.alien_bullets.append(bullet)
+        self.enemy_bullets.append(bullet)
+        self.audio.play("laser", 0.45)
+        if enemy.pattern == "boss":
+            for angle in (-18, 18):
+                rotated = pygame.Vector2(-1, 0).rotate(angle)
+                spread_velocity = rotated.normalize() * (speed * 0.85)
+                spread = Bullet(
+                    pos=pygame.Vector2(origin),
+                    velocity=spread_velocity,
+                    damage=ENEMY_BULLET_DAMAGE,
+                    color=pygame.Color(*ENEMY_BULLET_COLOR),
+                    size=(14, 14),
+                    from_player=False,
+                    glow_radius=28,
+                )
+                self.enemy_bullets.append(spread)
 
-    def update_alien_bullets(self, dt: float) -> None:
-        for bullet in self.alien_bullets[:]:
+    def update_enemy_bullets(self, dt: float) -> None:
+        for bullet in self.enemy_bullets[:]:
             bullet.update(dt)
-            if bullet.rect.top > SCREEN_HEIGHT + 40:
-                self.alien_bullets.remove(bullet)
-                continue
-            if self.damage_shields(bullet.rect, ALIEN_BULLET_DAMAGE):
-                self.alien_bullets.remove(bullet)
-                self.audio.play("shield", 0.5)
-                self.spawn_hit_sparks(pygame.Vector2(bullet.pos), tone="shield")
+            if self.bullet_offscreen(bullet):
+                self.enemy_bullets.remove(bullet)
                 continue
             if bullet.rect.colliderect(self.player_rect):
                 if self.player_invulnerable <= 0:
                     self.player_hit()
-                if bullet in self.alien_bullets:
-                    self.alien_bullets.remove(bullet)
+                if bullet in self.enemy_bullets:
+                    self.enemy_bullets.remove(bullet)
 
-    def update_ufo(self, dt: float) -> None:
-        if self.ufo_rect:
-            self.ufo_rect.x += int(self.ufo_direction * UFO_SPEED * dt)
-            if self.ufo_rect.right < -100 or self.ufo_rect.left > SCREEN_WIDTH + 100:
-                self.ufo_rect = None
-                self.ufo_timer = random.uniform(UFO_SPAWN_MIN, UFO_SPAWN_MAX)
-        else:
-            self.ufo_timer -= dt
-            if self.ufo_timer <= 0 and self.level > 1:
-                direction = random.choice([-1, 1])
-                if direction == 1:
-                    rect = pygame.Rect(-120, 80, self.ufo_surface.get_width(), self.ufo_surface.get_height())
-                else:
-                    rect = pygame.Rect(
-                        SCREEN_WIDTH + 50,
-                        80,
-                        self.ufo_surface.get_width(),
-                        self.ufo_surface.get_height(),
-                    )
-                self.ufo_rect = rect
-                self.ufo_direction = direction
-                self.ufo_timer = random.uniform(UFO_SPAWN_MIN, UFO_SPAWN_MAX)
+    def bullet_offscreen(self, bullet: Bullet) -> bool:
+        margin = 140
+        rect = bullet.rect
+        return (
+            rect.right < -margin
+            or rect.left > SCREEN_WIDTH + margin
+            or rect.bottom < -margin
+            or rect.top > SCREEN_HEIGHT + margin
+        )
 
     def update_particles(self, dt: float) -> None:
         alive_particles = []
@@ -916,19 +1131,14 @@ class Game:
     def player_hit(self) -> None:
         self.lives -= 1
         self.player_invulnerable = PLAYER_INVULNERABLE_TIME
-        self.spawn_explosion(pygame.Vector2(self.player_rect.center), sparks=40)
+        self.spawn_explosion(pygame.Vector2(self.player_rect.center), sparks=50)
         self.audio.play("explosion", 0.9)
-        self.player_rect.midbottom = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 60)
-        self.player_x = float(self.player_rect.x)
-        self.alien_bullets.clear()
+        self.player_pos.update(SCREEN_WIDTH * 0.18, SCREEN_HEIGHT * 0.5)
+        self.player_rect.center = (int(self.player_pos.x), int(self.player_pos.y))
+        self.player_velocity.update(0, 0)
+        self.enemy_bullets.clear()
         if self.lives <= 0:
             self.state = "game_over"
-
-    def damage_shields(self, rect: pygame.Rect, damage: int) -> bool:
-        for shield in self.shields:
-            if shield.apply_damage(rect, damage):
-                return True
-        return False
 
     def spawn_particles(
         self,
@@ -971,24 +1181,26 @@ class Game:
         self.spawn_particles(
             position,
             count=6,
-            speed_range=(60, 180),
+            speed_range=(80, 220),
             colors=colors,
-            lifetime_range=(0.1, 0.3),
+            lifetime_range=(0.12, 0.28),
         )
 
-    def spawn_thruster_particles(self) -> None:
-        base = pygame.Vector2(self.player_rect.centerx, self.player_rect.bottom + 4)
+    def spawn_thruster_particles(self, focus: bool = False) -> None:
+        base = pygame.Vector2(self.player_rect.left - 6, self.player_rect.centery)
         colors = [(255, 150, 90), (255, 200, 120), (255, 255, 160)]
-        for _ in range(3):
-            velocity = pygame.Vector2(random.uniform(-20, 20), random.uniform(120, 200))
+        count = 2 if focus else 3
+        for _ in range(count):
+            velocity = pygame.Vector2(random.uniform(-220, -140), random.uniform(-40, 40))
+            if focus:
+                velocity *= 0.7
             particle = Particle(
-                pos=pygame.Vector2(base.x + random.uniform(-8, 8), base.y),
+                pos=pygame.Vector2(base.x, base.y + random.uniform(-10, 10)),
                 velocity=velocity,
-                lifetime=random.uniform(0.2, 0.4),
+                lifetime=random.uniform(0.25, 0.45),
                 color=pygame.Color(*random.choice(colors)),
                 radius=random.uniform(2, 4),
                 fade=random.uniform(1.4, 2.0),
-                gravity=-40,
             )
             self.particles.append(particle)
 
@@ -1001,26 +1213,28 @@ class Game:
             colors=colors,
             lifetime_range=(0.2, 0.7),
         )
-
     # -- Drawing --------------------------------------------------------------------
 
     def draw(self) -> None:
         self.render_surface.blit(self.background_surface, (0, 0))
 
+        parallax_shift = (self.stage_timer * self.scroll_speed * 0.2) % SCREEN_WIDTH
+        for i in range(-1, 3):
+            x = int(SCREEN_WIDTH - parallax_shift - i * 220)
+            stripe_rect = pygame.Rect(x, 0, 4, SCREEN_HEIGHT)
+            pygame.draw.rect(self.render_surface, (24, 36, 66, 70), stripe_rect)
+
         for star in self.stars:
             star.draw(self.render_surface, self.time_accumulator)
 
-        if self.ufo_rect:
-            self.draw_glow(self.render_surface, self.ufo_rect.center, 70, (255, 60, 80))
-            self.render_surface.blit(self.ufo_surface, self.ufo_rect)
+        for enemy in self.enemies:
+            color_sample = enemy.surface.get_at((enemy.surface.get_width() // 2, enemy.surface.get_height() // 2))
+            glow_color = (color_sample.r, color_sample.g, color_sample.b)
+            radius = 90 if enemy.pattern == "boss" else 46
+            self.draw_glow(self.render_surface, enemy.rect.center, radius, glow_color)
+            enemy.draw(self.render_surface, self.time_accumulator)
 
-        for alien in self.aliens:
-            alien.draw(self.render_surface, self.time_accumulator)
-
-        for shield in self.shields:
-            shield.draw(self.render_surface)
-
-        for bullet in self.player_bullets + self.alien_bullets:
+        for bullet in self.player_bullets + self.enemy_bullets:
             self.draw_bullet(bullet)
 
         self.draw_player()
@@ -1029,6 +1243,7 @@ class Game:
             particle.draw(self.render_surface)
 
         self.draw_hud()
+        self.draw_stage_banner()
 
         if self.state == "game_over":
             self.draw_game_over()
@@ -1038,21 +1253,25 @@ class Game:
         pygame.display.flip()
 
     def draw_player(self) -> None:
-        blink = int(self.player_invulnerable * 10) % 2 == 0 or self.player_invulnerable <= 0 or self.state != "playing"
+        blink = (
+            int(self.player_invulnerable * 10) % 2 == 0
+            or self.player_invulnerable <= 0
+            or self.state != "playing"
+        )
         if not blink:
             return
         center = self.player_rect.center
-        self.draw_glow(self.render_surface, center, 60, PLAYER_GLOW_COLOR)
-        tilt = max(-8, min(8, self.player_tilt))
+        self.draw_glow(self.render_surface, (center[0] + 10, center[1]), 68, PLAYER_GLOW_COLOR)
+        tilt = max(-10, min(10, self.player_tilt))
         rotated = pygame.transform.rotate(self.player_surface, tilt)
         rect = rotated.get_rect(center=center)
         self.render_surface.blit(rotated, rect)
-        flame_height = 18 + int(6 * math.sin(self.time_accumulator * 18))
+        flame_length = 26 + int(6 * math.sin(self.time_accumulator * 16))
         flame_color = pygame.Color(255, 170, 90, 200)
         flame = [
-            (self.player_rect.centerx - 10, self.player_rect.bottom - 4),
-            (self.player_rect.centerx + 10, self.player_rect.bottom - 4),
-            (self.player_rect.centerx, self.player_rect.bottom + flame_height),
+            (self.player_rect.left - flame_length, self.player_rect.centery),
+            (self.player_rect.left - 6, self.player_rect.centery - 10),
+            (self.player_rect.left - 6, self.player_rect.centery + 10),
         ]
         pygame.draw.polygon(self.render_surface, flame_color, flame)
 
@@ -1089,34 +1308,51 @@ class Game:
         surface.blit(glow, rect)
 
     def draw_hud(self) -> None:
-        score_text = self.font.render(f"SCORE {self.score:06d}", True, HUD_COLOR)
-        level_text = self.font.render(f"WAVE {self.level}", True, HUD_COLOR)
-        lives_text = self.font.render(f"LIVES {self.lives}", True, HUD_COLOR)
+        score_text = self.font.render(f"SCORE {self.score:07d}", True, HUD_COLOR)
+        sector_text = self.font.render(f"SECTOR {self.level}", True, HUD_COLOR)
+        voyage = min(1.0, self.stage_timer / self.stage_duration) if self.stage_duration > 0 else 0.0
+        voyage_text = self.font.render(f"VOYAGE {int(voyage * 100):02d}%", True, HUD_COLOR)
         self.render_surface.blit(score_text, (22, 20))
-        self.render_surface.blit(level_text, (SCREEN_WIDTH // 2 - level_text.get_width() // 2, 20))
-        self.render_surface.blit(lives_text, (SCREEN_WIDTH - lives_text.get_width() - 24, 20))
+        self.render_surface.blit(sector_text, (SCREEN_WIDTH // 2 - sector_text.get_width() // 2, 20))
+        self.render_surface.blit(voyage_text, (SCREEN_WIDTH - voyage_text.get_width() - 24, 20))
+        bar_bg = pygame.Rect(22, 56, 220, 6)
+        pygame.draw.rect(self.render_surface, (20, 30, 50, 160), bar_bg, border_radius=3)
+        bar = bar_bg.copy()
+        bar.width = int(bar.width * voyage)
+        pygame.draw.rect(self.render_surface, (80, 210, 255, 200), bar, border_radius=3)
+        lives_text = self.small_font.render(f"LIVES {self.lives}", True, HUD_COLOR)
+        self.render_surface.blit(lives_text, (22, 68))
         if self.audio.enabled:
             volume = int(self.audio.master_volume * 100)
             label = "MUTED" if self.audio.muted or volume == 0 else f"VOL {volume}%"
-            volume_text = self.small_font.render(f"{label} (M to toggle)", True, HUD_COLOR)
+            volume_text = self.small_font.render(f"{label} (M)", True, HUD_COLOR)
         else:
             volume_text = self.small_font.render("Audio unavailable", True, HUD_COLOR)
-        self.render_surface.blit(volume_text, (22, 52))
+        self.render_surface.blit(volume_text, (SCREEN_WIDTH - volume_text.get_width() - 24, 52))
+
+    def draw_stage_banner(self) -> None:
+        if self.stage_banner_timer <= 0:
+            return
+        t = min(1.0, self.stage_banner_timer / 3.0)
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, int(120 * t)))
+        self.render_surface.blit(overlay, (0, 0))
+        title = self.big_font.render(f"SECTOR {self.level}", True, HUD_COLOR)
+        subtitle = self.font.render(self.current_sector_name, True, HUD_COLOR)
+        y = SCREEN_HEIGHT * 0.28
+        self.render_surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, int(y)))
+        self.render_surface.blit(subtitle, (SCREEN_WIDTH // 2 - subtitle.get_width() // 2, int(y + 64)))
 
     def draw_game_over(self) -> None:
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        overlay.fill((0, 0, 0, 170))
         self.render_surface.blit(overlay, (0, 0))
-
-        title = self.big_font.render("GAME OVER", True, HUD_COLOR)
-        prompt = self.font.render("Press Enter to try again", True, HUD_COLOR)
+        title = self.big_font.render("MISSION FAILED", True, HUD_COLOR)
+        prompt = self.font.render("Press Enter to relaunch", True, HUD_COLOR)
         score = self.font.render(f"Final score: {self.score}", True, HUD_COLOR)
-
         self.render_surface.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, SCREEN_HEIGHT // 2 - 120))
         self.render_surface.blit(score, (SCREEN_WIDTH // 2 - score.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
         self.render_surface.blit(prompt, (SCREEN_WIDTH // 2 - prompt.get_width() // 2, SCREEN_HEIGHT // 2 + 30))
-
-
 # --- Entrypoint --------------------------------------------------------------------
 
 

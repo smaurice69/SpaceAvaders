@@ -2,8 +2,8 @@
 
 A compact Space-Invaders inspired arcade game built with Python 3 and pygame. The
 visuals are all generated with simple rectangles, gradients, and particles—no
-external assets are required. Expect quick rounds, crunchy laser blasts, and
-waves that keep pushing back.
+external assets are required. Expect a side-scrolling gauntlet of enemy waves,
+flashy lasers, and a synthy starfield that keeps the run feeling alive.
 
 ## Getting started
 
@@ -17,23 +17,24 @@ waves that keep pushing back.
    python3 space_invaders.py
    ```
 
-The window opens at 900×700. Use `←` / `→` (or `A` / `D`) to move and `Space`
-to fire. Press `Esc` to quit.
+The window opens at 900×700. Fly with `←` / `→` / `↑` / `↓` (or `WASD`), hold
+`Shift` to tighten your dodge window, and tap `Space` (or `Z` / `X`) to fire.
+Press `Esc` to quit.
 
 ## Gameplay features
 
-- **Classic formation battles** – Aliens march as a block, dive closer when
-  touching the arena edges, and their pace accelerates as you thin the horde.
-- **Responsive controls** – Tight, smooth left/right movement and a comfortable
-  firing cadence that encourages staying aggressive.
-- **Enemy fire** – Invaders shoot back from the front line, forcing you to weave
-  between incoming bolts.
-- **Scaling difficulty** – Clearing a wave bumps the difficulty: higher alien
-  speeds, denser formations, and quicker shots.
-- **Score chasing** – Rack up points with clean kills, tag the occasional bonus
-  UFO for a big payout, and keep an eye on the HUD for lives, wave, and score.
-- **Juice** – Simple particle bursts and a drifting starfield give every blast a
-  little extra flair.
+- **Scrolling space lanes** – Each sector auto-scrolls like the early console
+  greats, pushing you to weave through debris and enemy fire.
+- **Hand-scripted waves** – Sine-surfing scouts, dive-bombing raiders, hovering
+  turrets, and mine walls keep the action varied.
+- **Sector bosses** – Every stage culminates with a hulking warship that floods
+  the screen with patterns straight out of the 8-bit era.
+- **Responsive controls** – Smooth omni-directional movement, a focus/slowdown
+  option on `Shift`, and a rapid-fire blaster encourage daring dodges.
+- **Escalating pace** – Clear a sector to jump to a faster scroll speed and a
+  remixed spawn schedule.
+- **Juice** – Particle bursts, glowing projectiles, and procedural sprites keep
+  the minimalist presentation energetic.
 
 Losing all three lives ends the run. Hit `Enter` on the game-over screen to try
 again.
